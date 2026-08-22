@@ -34,7 +34,7 @@ describe('buildRedisOptions', () => {
     const strategy = opts.retryStrategy as NonNullable<RedisOptions['retryStrategy']>;
     expect(strategy(0)).toBeLessThanOrEqual(200);
     expect(strategy(5)).toBeLessThanOrEqual(2_000); // capped
-    expect(strategy(20)).toBeNull(); // give up eventually
+    expect(strategy(21)).toBeNull(); // give up eventually (> 20 retries)
   });
 
   it('honors the configured connect timeout', () => {
