@@ -4,7 +4,6 @@ import { buildLogger } from '../../src/lib/logger.js';
 function captureStdout(): { lines: unknown[]; restore: () => void } {
   const lines: unknown[] = [];
   const original = process.stdout.write;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   (process.stdout as { write: unknown }).write = (chunk: unknown) => {
     lines.push(chunk);
     return true;
