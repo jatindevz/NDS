@@ -63,6 +63,7 @@ describe.skipIf(!redisUp)('redis integration', () => {
 
 describe.skipIf(redisUp)('redis integration (skipped: redis not reachable)', () => {
   it('documents how to enable this suite', () => {
-    console.info('Run `docker compose up -d redis` to enable Redis integration tests');
+    // Info for the developer: run `docker compose up -d redis` to enable these tests.
+    expect(true).toBe(true);
   });
 });
