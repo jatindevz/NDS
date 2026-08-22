@@ -61,7 +61,7 @@ jobs:
         if: matrix.node == 20
         run: |
           npx vitest run --project integration --reporter=json --outputFile=/tmp/results.json
-          UNREACHABLE=$(node -e "const r=require('/tmp/results.json');console.log(r.testResults.some(t=>t.name.includes('integration'))&&r.testResults.flatMap(t=>t.assertionResults).some(a=>a.ancestorTitles.some(x=>x.includes('redis not reachable'))))")
+          UNREACHABLE=$(node -e "const r=require('/tmp/results.json');console.log(r.testResults.flatMap(t=>t.assertionResults).some(a=>a.status==='passed'&&a.ancestorTitles.some(x=>x.includes('redis not reachable'))))")
           if [ "$UNREACHABLE" = "true" ]; then
             echo "::error::Integration tests were skipped — Redis service likely unhealthy"
             exit 1
