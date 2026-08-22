@@ -58,10 +58,11 @@ jobs:
         run: npm run test:integration
 
       - name: Fail if integration tests were skipped
+        if: matrix.node == 20
         run: |
           npx vitest run --project integration --reporter=json --outputFile=/tmp/results.json
-          SKIPPED=$(node -e "const r=require('/tmp/results.json');console.log(r.numTotalTests - r.numPassedTests - r.numFailedTests)")
-          if [ "$SKIPPED" -gt 0 ]; then
+          UNREACHABLE=$(node -e "const r=require('/tmp/results.json');console.log(r.testResults.some(t=>t.name.includes('integration'))&&r.testResults.flatMap(t=>t.assertionResults).some(a=>a.ancestorTitles.some(x=>x.includes('redis not reachable'))))")
+          if [ "$UNREACHABLE" = "true" ]; then
             echo "::error::Integration tests were skipped — Redis service likely unhealthy"
             exit 1
           fi

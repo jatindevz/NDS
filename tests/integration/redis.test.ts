@@ -53,7 +53,9 @@ describe.skipIf(!redisUp)('redis integration', () => {
     await client.del('nds:test:key');
   });
 
-  it('rejects bad credentials quickly instead of hanging', async () => {
+  // Only meaningful against a password-protected Redis (local docker-compose).
+  // CI runs Redis passwordless, so there is no credential to get wrong.
+  it.skipIf(!url.password)('rejects bad credentials quickly instead of hanging', async () => {
     const badUrl = REDIS_URL.replace(/:([^@]*)@/, ':definitely-wrong-password@');
     await expect(
       createRedisClient({ url: badUrl, connectTimeoutMs: 3_000, logger }),
