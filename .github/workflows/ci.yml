@@ -21,17 +21,18 @@ jobs:
     services:
       redis:
         image: redis:7-alpine
-        command: ['redis-server', '--requirepass', 'nds_dev_password']
         ports:
           - 6379:6379
         options: >-
-          --health-cmd "redis-cli -a nds_dev_password ping"
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
 
     env:
-      REDIS_URL: redis://:nds_dev_password@localhost:6379
+      # CI Redis is an isolated per-job container; no password needed.
+      TEST_REDIS_URL: redis://localhost:6379
+      REDIS_URL: redis://localhost:6379
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/nds
 
     steps:
