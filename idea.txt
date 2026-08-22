@@ -1,0 +1,36 @@
+That's the shape of it: an API enqueues into a Redis-backed queue, workers pull and call the real destination, failures loop through exponential-backoff retries, and jobs that keep failing land in a dead-letter queue instead of vanishing. Postgres tracks idempotency keys and job status so retries never double-send. Now let me walk through why each piece matters and how to actually build it.
+
+**1. Why this exact shape, not something simpler**
+The naive version — "call the API, if it fails try again" — is what every junior project does and it's exactly what doesn't differentiate you. The three pieces that make this an SDE1-caliber project are the ones interviewers specifically probe for:
+- **Exponential backoff, not fixed retry** — retrying instantly just hammers a struggling downstream service harder. Backoff (1s, 2s, 4s, 8s...) gives it room to recover. This is the single most common "tell me about a time you handled failure" interview answer, and you'll actually have built it.
+- **Idempotency keys** — if a worker crashes *after* sending the email but *before* marking the job done, the naive system re-sends it on retry. An idempotency key (stored in Postgres, checked before acting) prevents the duplicate. This is the concept that separates "wrote code" from "understands distributed systems," and it's genuinely a top-tier SDE1 interview topic (Stripe's engineering blog on idempotency keys is the canonical reference — worth reading before you build this).
+- **Dead-letter queue** — jobs that fail forever (bad email address, permanently broken webhook URL) shouldn't retry infinitely or silently disappear. Routing them somewhere reviewable is what "production-grade" actually means in practice.
+
+**2. Concrete build plan (roughly 2-3 weekends of focused work)**
+
+*Phase 1 — core pipeline (weekend 1):*
+- Node.js + TypeScript, BullMQ (Redis-backed queue library — handles the retry/backoff/DLQ primitives for you, so you're using it correctly rather than reimplementing it badly)
+- One job type to start: "send email" (use Resend, since you already have that working from DSA Console)
+- Postgres table: `jobs(id, idempotency_key, payload, status, attempts, last_error, created_at)`
+- API route: `POST /jobs` — accepts a payload + client-provided idempotency key, checks Postgres first, enqueues if new
+
+*Phase 2 — resilience (weekend 2):*
+- Configure BullMQ's built-in exponential backoff and DLQ (it supports both natively — you're wiring config correctly, not hand-rolling retry loops, which is actually the more senior move)
+- Add per-destination rate limiting (BullMQ supports this too — e.g. max 10 jobs/sec to a given email domain)
+- Add a `GET /jobs/:id` status endpoint and a `GET /health` endpoint checking Redis + Postgres connectivity
+
+*Phase 3 — proof it's real (weekend 3):*
+- Unit tests: idempotency check rejects duplicate keys; backoff calculation produces expected delays; a job with `attempts >= maxAttempts` routes to DLQ
+- One integration test: enqueue a job against a mock endpoint that fails twice then succeeds, assert it eventually completes
+- Dockerfile + docker-compose (app + Redis + Postgres)
+- GitHub Actions: run tests on every push
+
+**3. What you should NOT do**
+- Don't build your own queue from scratch (a `setInterval` polling a Postgres table) — using BullMQ correctly is the right call for an SDE1; reimplementing Redis primitives badly is not more impressive, it's worse.
+- Don't add Kafka, Kubernetes, or microservices — that's over-scoped for the time you have and will read as buzzword-chasing in an interview when you can't explain why you needed a distributed log for a project with one job type.
+- Don't skip the tests to save a weekend — "I have tests for the retry logic" is the exact sentence that gets you past the resume screen the critique flagged you on.
+
+**4. How you'll talk about it in an interview**
+The strongest interview answer isn't "I built a job queue" — it's narrating a specific failure scenario: *"If the worker crashes after calling the email API but before updating Postgres, a naive retry double-sends. I solved that with an idempotency key checked before dispatch, so a retried job with the same key is a no-op."* That one sentence, backed by real code you can screen-share, is worth more than any bullet point on the page.
+
+

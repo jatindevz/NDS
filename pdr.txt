@@ -1,0 +1,188 @@
+# Project Design Requirements (PDR)
+## Job Queue & Notification Delivery Service
+
+**Author:** Jatin Patil
+**Status:** Draft — pre-implementation
+**Target:** Portfolio project for SDE1 applications
+
+---
+
+## 1. Problem Statement
+
+Applications that need to notify users (emails, webhooks, SMS) via third-party APIs face a common failure class: the destination is slow, rate-limited, or temporarily down. A naive `await sendEmail()` call either blocks the request, silently drops the notification on failure, or — if retried carelessly — sends duplicates.
+
+This project builds a standalone backend service that accepts "send this notification" jobs, queues them, and delivers them reliably: with retries, without duplicates, and without losing failed jobs.
+
+**Why this project:** it is scoped narrowly enough to finish solo in ~3 weekends, but touches the exact set of concepts (queueing, retries, idempotency, rate limiting, observability, testing, CI) that most fresher resumes lack and that SDE1 interviews probe for directly.
+
+---
+
+## 2. Goals
+
+- G1: Accept job submissions via a REST API and deliver them asynchronously.
+- G2: Survive destination failures without losing jobs or double-sending.
+- G3: Make failure behavior observable and inspectable (not just "it works").
+- G4: Prove correctness with automated tests, not just manual clicking.
+- G5: Be deployable and runnable by a stranger with `docker compose up`.
+
+## 3. Non-Goals
+
+- NG1: Not building a general-purpose distributed message broker (Kafka-scale). BullMQ over Redis is sufficient at this scope.
+- NG2: Not building multi-tenant auth/billing. A single API key is enough.
+- NG3: Not supporting every notification channel. Email (Resend) is the primary channel; a generic webhook POST is the secondary channel. SMS is out of scope.
+- NG4: Not building a UI/dashboard. A CLI or `curl`-able API is sufficient; a minimal read-only status page is a stretch goal only.
+
+---
+
+## 4. Requirements
+
+### 4.1 Functional Requirements
+
+| ID | Requirement |
+|----|-------------|
+| FR1 | Client can submit a job: `POST /jobs` with `type` (`email` \| `webhook`), `payload`, and a client-supplied `idempotency_key`. |
+| FR2 | Submitting the same `idempotency_key` twice returns the original job's status without creating a duplicate or re-sending. |
+| FR3 | A worker process consumes queued jobs and executes the appropriate handler (call Resend API, or POST to a webhook URL). |
+| FR4 | On handler failure, the job retries with exponential backoff up to a configurable max attempt count. |
+| FR5 | A job that exhausts its retries moves to a dead-letter queue (DLQ) and is not silently dropped. |
+| FR6 | Client can check job status: `GET /jobs/:id` → `queued \| processing \| completed \| failed \| dead_letter`. |
+| FR7 | Jobs to the same destination are rate-limited (configurable, e.g. 10/sec per destination domain) so one bad actor can't starve the queue. |
+| FR8 | `GET /health` reports Redis and Postgres connectivity. |
+| FR9 | A CLI or API endpoint can list and manually re-queue DLQ jobs. |
+
+### 4.2 Non-Functional Requirements
+
+| ID | Requirement |
+|----|-------------|
+| NFR1 | All state transitions (attempt count, last error, timestamps) are persisted in Postgres — not held only in memory. |
+| NFR2 | Structured (JSON) logs for every job lifecycle event, so failures are diagnosable from logs alone. |
+| NFR3 | Core logic (idempotency check, backoff calculation, DLQ routing) has unit test coverage. |
+| NFR4 | At least one integration test exercises the full enqueue → fail → retry → succeed path against a mock destination. |
+| NFR5 | Runs via `docker compose up` with no manual setup beyond copying `.env.example`. |
+| NFR6 | CI (GitHub Actions) runs the full test suite on every push and blocks merge on failure. |
+
+---
+
+## 5. Architecture
+
+```
+Client → POST /jobs → API → Redis Queue (BullMQ) → Worker Pool
+                                                        │
+                                                        ├─→ Destination (Resend / Webhook)
+                                                        │      │ success            │ failure
+                                                        │      ▼                    ▼
+                                                        │  mark completed      retry w/ backoff
+                                                        │                            │
+                                                        │                     attempts exhausted
+                                                        │                            ▼
+                                                        │                    Dead-letter queue
+                                                        │
+                                                Postgres: idempotency keys, job status, attempt history
+                                                Logs + /health: observability
+```
+
+**Components:**
+- **API** (Next.js or Express route handlers) — validates requests, checks idempotency, enqueues.
+- **Queue** — BullMQ on Redis. Provides retry/backoff/DLQ primitives natively; do not hand-roll these.
+- **Worker pool** — separate Node process(es) consuming the queue, executing handlers per job `type`.
+- **Postgres** — source of truth for job status and idempotency keys (Redis holds queue state, not the durable record).
+- **Notification providers** — Resend (email), generic HTTP POST (webhook).
+
+---
+
+## 6. Data Model
+
+```sql
+create table jobs (
+  id                uuid primary key default gen_random_uuid(),
+  idempotency_key   text unique not null,
+  type              text not null check (type in ('email', 'webhook')),
+  payload           jsonb not null,
+  status            text not null default 'queued'
+                      check (status in ('queued','processing','completed','failed','dead_letter')),
+  attempts          int not null default 0,
+  max_attempts      int not null default 5,
+  last_error        text,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create index on jobs (status);
+create index on jobs (idempotency_key);
+```
+
+---
+
+## 7. API Design
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/jobs` | Enqueue a job. Body: `{ type, payload, idempotency_key }`. Returns `{ id, status }`. Returns the existing job (200, not 201) if `idempotency_key` already exists. |
+| `GET` | `/jobs/:id` | Returns current job status, attempt count, last error if any. |
+| `GET` | `/jobs?status=dead_letter` | List DLQ jobs. |
+| `POST` | `/jobs/:id/retry` | Manually re-queue a DLQ job (resets attempts). |
+| `GET` | `/health` | `{ redis: "ok", postgres: "ok" }` or 503 with the failing component named. |
+
+---
+
+## 8. Failure Handling Design (the core of the project)
+
+**Retry policy:** exponential backoff, e.g. `delay = base * 2^attempt` (base = 1s, cap at 60s), max 5 attempts — configured directly in BullMQ, not custom-coded.
+
+**Idempotency:** the API checks `idempotency_key` in Postgres *before* enqueueing. If found, return the existing job's current state instead of creating a new one. This is what prevents a client's network-retry from creating a duplicate send.
+
+**Dead-letter queue:** BullMQ's built-in failed-job handling is configured to move a job to a DLQ list after `max_attempts` is exhausted, rather than discarding it. DLQ jobs remain queryable and manually re-triggerable via `POST /jobs/:id/retry`.
+
+**Rate limiting:** BullMQ's per-queue rate limiter caps dispatch rate to a given destination domain, so a burst of jobs to one flaky endpoint doesn't consume all worker capacity.
+
+**Idempotent handlers:** where possible, handlers themselves should also be safe to re-run (e.g., webhook payload includes the same `idempotency_key` so the receiver can dedupe on their end too) — this is worth one paragraph of design discussion even if not fully implemented, since it demonstrates awareness of "idempotency needs to be end-to-end, not just at my API boundary."
+
+---
+
+## 9. Testing Strategy
+
+- **Unit tests** (Jest/Vitest):
+  - Idempotency check rejects a duplicate key without creating a new row.
+  - Backoff delay calculation produces expected values for attempts 0–4.
+  - A job with `attempts >= max_attempts` is routed to `dead_letter`, not retried again.
+- **Integration test:**
+  - Enqueue a job against a mock HTTP destination that fails twice, then succeeds on the third call. Assert final status is `completed` and `attempts == 3`.
+- **Manual test checklist** (documented in README): kill the worker mid-job, confirm no duplicate send on restart.
+
+---
+
+## 10. Deployment & CI
+
+- `Dockerfile` for the app; `docker-compose.yml` bringing up app + Redis + Postgres.
+- `.env.example` documenting required vars (`REDIS_URL`, `DATABASE_URL`, `RESEND_API_KEY`).
+- GitHub Actions workflow: on push/PR — install, lint, run unit + integration tests, build Docker image.
+
+---
+
+## 11. Milestones
+
+| Phase | Scope | Est. time |
+|-------|-------|-----------|
+| 1 | API + Postgres schema + BullMQ enqueue/consume, single email job type working end-to-end | Weekend 1 |
+| 2 | Backoff, DLQ, rate limiting, `/health`, `/jobs/:id` status endpoint | Weekend 2 |
+| 3 | Unit + integration tests, Dockerize, GitHub Actions CI, README | Weekend 3 |
+
+## 12. Stretch Goals (only after 1–3 are solid)
+
+- Webhook job type in addition to email.
+- Minimal read-only status page listing recent jobs and DLQ contents.
+- Prometheus-style `/metrics` endpoint (jobs processed, failure rate, queue depth).
+
+---
+
+## 13. Risks / Open Questions
+
+- **Risk:** Scope creep toward "distributed system" (multi-node workers, leader election) — explicitly out of scope per NG1. Resist this.
+- **Open question:** Should idempotency keys be client-generated (current plan) or server-generated from a payload hash? Client-generated is simpler and matches real-world API design (Stripe's model) — default to this unless a concrete reason emerges to change it.
+- **Risk:** Under time pressure, tests get cut first. NFR3/NFR4 are non-negotiable — they are the single highest-leverage part of this project for interview credibility.
+
+---
+
+## 14. Resume Bullet (once built, only if true)
+
+> Built a job queue and webhook/email delivery service (Node.js, TypeScript, BullMQ, Redis, PostgreSQL) with exponential-backoff retries, idempotency keys, per-destination rate limiting, and a dead-letter queue for undeliverable jobs; covered core retry/idempotency logic with unit and integration tests and deployed via Docker with a CI pipeline running tests on every push.
