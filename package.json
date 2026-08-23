@@ -31,5 +31,8 @@
     "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.11",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "redis-memory-server": "^0.17.1"
   }
 }
