@@ -16,9 +16,11 @@ export function buildNotificationsWorkerOptions(opts: {
   concurrency: number;
   stalledIntervalMs?: number;
   maxStalledCount?: number;
+  prefix?: string;
 }): WorkerTuning {
   return {
     concurrency: opts.concurrency,
+    prefix: opts.prefix,
     stalledInterval: opts.stalledIntervalMs ?? DEFAULT_STALLED_INTERVAL_MS,
     maxStalledCount: opts.maxStalledCount ?? DEFAULT_MAX_STALLED_COUNT,
     settings: notificationsQueueSettings,
@@ -39,6 +41,7 @@ export function createNotificationsWorker(deps: {
   concurrency: number;
   stalledIntervalMs?: number;
   maxStalledCount?: number;
+  prefix?: string;
 }): Worker {
   const worker = new Worker(
     NOTIFICATIONS_QUEUE,
@@ -48,6 +51,7 @@ export function createNotificationsWorker(deps: {
         concurrency: deps.concurrency,
         stalledIntervalMs: deps.stalledIntervalMs,
         maxStalledCount: deps.maxStalledCount,
+        prefix: deps.prefix,
       }),
       connection: deps.connection,
     },

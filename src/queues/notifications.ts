@@ -35,10 +35,14 @@ export const notificationsDefaultJobOptions: JobsOptions = {
   removeOnFail: false,
 };
 
-export function createNotificationsQueue(connection: Redis): Queue {
+export function createNotificationsQueue(
+  connection: Redis,
+  opts: { prefix?: string } = {},
+): Queue {
   return new Queue(NOTIFICATIONS_QUEUE, {
     connection,
     defaultJobOptions: notificationsDefaultJobOptions,
     settings: notificationsQueueSettings,
+    prefix: opts.prefix,
   });
 }

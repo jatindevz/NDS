@@ -38,19 +38,14 @@ describe.skipIf(!redisUp)('notifications queue end-to-end', () => {
   const prefix = `nds-test-${randomUUID().slice(0, 8)}`;
 
   beforeAll(async () => {
-    // All BullMQ keys flow through this client, so a per-run keyPrefix
-    // gives every test run its own isolated keyspace.
-    client = await createRedisClient({
-      url: REDIS_URL,
-      connectTimeoutMs: 3_000,
-      logger,
-      keyPrefix: `${prefix}:`,
-    });
-    queue = createNotificationsQueue(client);
+    client = await createRedisClient({ url: REDIS_URL, connectTimeoutMs: 3_000, logger });
+    // BullMQ requires its own `prefix` option (it rejects ioredis keyPrefix);
+    // a per-run prefix gives every test run an isolated keyspace.
+    queue = createNotificationsQueue(client, { prefix });
   });
 
   afterAll(async () => {
-    await queue.obliterate({ force: true }).catch(() => {});
+    await queue?.obliterate({ force: true }).catch(() => {});
     await worker?.close().catch(() => {});
     await queue.close().catch(() => {});
     await client.quit().catch(() => client.disconnect());
@@ -62,6 +57,7 @@ describe.skipIf(!redisUp)('notifications queue end-to-end', () => {
       registry,
       logger,
       concurrency: 2,
+      prefix,
     });
     return worker;
   }
