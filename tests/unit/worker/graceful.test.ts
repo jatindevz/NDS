@@ -107,3 +107,18 @@ describe('registerGracefulShutdown', () => {
     expect(process.listenerCount('SIGTERM')).toBe(listenersBefore);
   });
 });
+
+describe('registerGracefulShutdown onShutdownComplete', () => {
+  it('notifies the caller with the final result', async () => {
+    const results: Array<{ clean: boolean }> = [];
+    const { shutdown } = registerGracefulShutdown({
+      components: [{ name: 'redis', close: async () => {} }],
+      signals: [],
+      timeoutMs: 1_000,
+      logger,
+      onShutdownComplete: (result) => results.push(result),
+    });
+    await shutdown();
+    expect(results).toEqual([{ clean: true }]);
+  });
+});

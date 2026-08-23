@@ -9,6 +9,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(256).default(5),
+  GRACEFUL_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000),
   REDIS_URL: z.string().url(),
   DATABASE_URL: z.string().url(),
   RESEND_API_KEY: z.string().optional(),
@@ -19,6 +21,8 @@ export type AppConfig = {
   isProduction: boolean;
   port: number;
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
+  workerConcurrency: number;
+  gracefulShutdownTimeoutMs: number;
   redisUrl: string;
   databaseUrl: string;
   resendApiKey: string | undefined;
@@ -45,6 +49,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     isProduction: e.NODE_ENV === 'production',
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
+    workerConcurrency: e.WORKER_CONCURRENCY,
+    gracefulShutdownTimeoutMs: e.GRACEFUL_SHUTDOWN_TIMEOUT_MS,
     redisUrl: e.REDIS_URL,
     databaseUrl: e.DATABASE_URL,
     resendApiKey: e.RESEND_API_KEY,

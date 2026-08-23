@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "worker": "tsx src/worker/index.ts"
   },
   "dependencies": {
     "@eslint/js": "^10.0.1",

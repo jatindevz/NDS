@@ -22,6 +22,7 @@ export function registerGracefulShutdown(deps: {
   signals: NodeJS.Signals[];
   timeoutMs: number;
   logger: Logger;
+  onShutdownComplete?: (result: ShutdownResult) => void;
 }): { shutdown: () => Promise<ShutdownResult>; unregister: () => void } {
   let shuttingDown = false;
 
@@ -37,6 +38,7 @@ export function registerGracefulShutdown(deps: {
       clean = clean && ok;
     }
     deps.logger.info({ clean }, 'graceful shutdown finished');
+    deps.onShutdownComplete?.({ clean });
     return { clean };
   }
 

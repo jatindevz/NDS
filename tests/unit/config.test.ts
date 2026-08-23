@@ -32,6 +32,8 @@ describe('loadConfig', () => {
     const config = loadConfig();
     expect(config.logLevel).toBe('info');
     expect(config.port).toBe(3000);
+    expect(config.workerConcurrency).toBe(5);
+    expect(config.gracefulShutdownTimeoutMs).toBe(10_000);
   });
 
   it('fails fast when REDIS_URL is missing', () => {
@@ -62,6 +64,12 @@ describe('loadConfig', () => {
     setValidEnv();
     process.env.PORT = '99999';
     expect(() => loadConfig()).toThrow(/PORT/);
+  });
+
+  it('rejects a non-positive WORKER_CONCURRENCY', () => {
+    setValidEnv();
+    process.env.WORKER_CONCURRENCY = '0';
+    expect(() => loadConfig()).toThrow(/WORKER_CONCURRENCY/);
   });
 
   it('flags production mode', () => {
