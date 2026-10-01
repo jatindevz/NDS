@@ -4,6 +4,8 @@ import { InvalidJobError, jobEnvelopeSchema, type NotificationType } from '../jo
 
 export type HandlerContext = {
   jobId: string;
+  /** Surfaced so handlers can propagate it end-to-end (webhook receivers dedupe on it, TDR §8). */
+  idempotencyKey: string;
   logger: Logger;
 };
 
@@ -39,7 +41,11 @@ export function buildProcessor(registry: HandlerRegistry, baseLogger: Logger): P
     });
     logger.info('job processing started');
     try {
-      await handler(payload, { jobId: String(job.id), logger });
+      await handler(payload, {
+        jobId: String(job.id),
+        idempotencyKey: envelope.data.idempotencyKey,
+        logger,
+      });
     } catch (err) {
       if (err instanceof InvalidJobError) {
         // The handler re-validated the payload and rejected it: permanent.

@@ -30,15 +30,33 @@ src/
   queues/
     notifications.ts   # queue name, default job options, custom backoff strategy
   services/
-    enqueue.ts         # validate-then-enqueue (future HTTP handlers call this)
+    enqueue.ts         # validate-then-enqueue (HTTP handlers call this)
+  db/
+    schema.sql         # DDL: jobs table (idempotency UNIQUE, status CHECK)
+    client.ts          # pg pool factory, ping, bounded close
+    jobs.repository.ts # createOrGetJob (race-safe), findById, updateStatus, listByStatus
+    migrate.ts         # idempotent, transactional migration runner (npm run migrate)
+  api/
+    server.ts          # express app factory (supertest-friendly)
+    index.ts           # API entrypoint (npm run api)
+    errors.ts          # HttpError taxonomy -> TDR §7 status codes
+    error-middleware.ts# central error translation + JSON 404
+    middleware/        # bearer-token auth (fail-closed), zod validation
+    routes/            # POST /jobs, GET /jobs(/:id), POST /jobs/:id/retry, GET /health
+  handlers/
+    registry.ts        # wires channel handlers from config
+    delivery.ts        # provider failure -> poison/retry translation
+    email.ts           # Resend REST provider (fetch, no SDK)
+    webhook.ts         # webhook POST + SSRF guard, idempotency-key propagation
+    providers.ts       # provider ports + transient/permanent classification
   worker/
-    handlers.ts        # handler registry + poison-message guard (UnrecoverableError)
+    handlers.ts        # processor + poison-message guard (UnrecoverableError)
     notifications-worker.ts # worker factory: concurrency, stall detection, lifecycle logs
     graceful.ts        # ordered shutdown w/ per-component timeout + force-kill
     index.ts           # worker entrypoint (npm run worker)
 tests/
   unit/                # fast, deterministic, no I/O
-  integration/         # real Redis; auto-skips when Redis is unreachable
+  integration/         # real Redis + Postgres; auto-skip when unreachable
 docker-compose.yml     # Redis (auth, AOF) + Postgres, both healthchecked
 ```
 
@@ -59,10 +77,12 @@ docker-compose.yml     # Redis (auth, AOF) + Postgres, both healthchecked
 ```bash
 make install        # npm install
 make up             # start Redis + Postgres (docker compose)
-make test           # unit + integration (integration skips if Redis is down)
+make migrate        # apply the database schema (idempotent)
+make test           # unit + integration (integration skips if services are down)
 make test-unit      # unit only
 make lint           # eslint
 make typecheck      # tsc --noEmit (strict)
+npm run api         # run the API (POST /jobs, GET /jobs/:id, GET /health, ...)
 npm run worker      # run the worker against local Redis
 ```
 

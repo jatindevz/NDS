@@ -28,11 +28,25 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nds
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nds"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
 
     env:
-      # CI Redis is an isolated per-job container; no password needed.
+      # CI services are isolated per-job containers; no passwords needed.
       TEST_REDIS_URL: redis://localhost:6379
       REDIS_URL: redis://localhost:6379
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nds
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/nds
 
     steps:

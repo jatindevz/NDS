@@ -8,3 +8,8 @@ coverage/
 .idea/
 .vscode/
 .DS_Store
+BUILD-PROMPT.md
+PROJECT-STATUS.md
+UISTYLEDOC-job-queue-service.md
+TDR-job-queue-service.md
+pdr.txt

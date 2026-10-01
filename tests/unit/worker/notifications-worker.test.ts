@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
+import { UnrecoverableError } from 'bullmq';
 import type { Logger } from 'pino';
 import type { Job, Worker } from 'bullmq';
 import {
@@ -45,16 +46,18 @@ describe('buildNotificationsWorkerOptions', () => {
 });
 
 describe('attachWorkerLifecycleLogging', () => {
-  it('logs completions with the final attempt count', () => {
+  it('logs completions with the final attempt count (BullMQ pre-increments before emitting)', () => {
     const { logger, entries } = recordingLogger();
     const w = new EventEmitter();
     attachWorkerLifecycleLogging(w as unknown as Worker, logger);
-    const job = { id: 'j1', attemptsMade: 1 } as unknown as Job;
+    // attemptsMade is already the final count when 'completed' fires:
+    // a job that succeeded on its 3rd attempt reports attemptsMade 3 here.
+    const job = { id: 'j1', attemptsMade: 3 } as unknown as Job;
     w.emit('completed', job, 'result', 'active');
     expect(entries).toContainEqual({
       level: 'info',
       msg: 'job completed',
-      fields: { jobId: 'j1', attempts: 2 },
+      fields: { jobId: 'j1', attempts: 3 },
     });
   });
 
@@ -77,6 +80,18 @@ describe('attachWorkerLifecycleLogging', () => {
     const job = { id: 'j3', attemptsMade: 5, opts: { attempts: 5 } } as unknown as Job;
     w.emit('failed', job, new Error('boom'), 'active');
     expect(entries.some((e) => e.msg === 'job exhausted all attempts' && e.level === 'error')).toBe(true);
+  });
+
+  it('does not claim a retry for UnrecoverableError poison messages', () => {
+    const { logger, entries } = recordingLogger();
+    const w = new EventEmitter();
+    attachWorkerLifecycleLogging(w as unknown as Worker, logger);
+    const job = { id: 'j5', attemptsMade: 1, opts: { attempts: 5 } } as unknown as Job;
+    w.emit('failed', job, new UnrecoverableError('unknown job type'), 'active');
+    expect(
+      entries.some((e) => e.msg === 'job failed unrecoverably (poison message)' && e.level === 'error'),
+    ).toBe(true);
+    expect(entries.some((e) => e.msg === 'job failed, retrying')).toBe(false);
   });
 
   it('warns on stalled jobs', () => {

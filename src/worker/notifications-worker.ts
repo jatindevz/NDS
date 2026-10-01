@@ -1,4 +1,4 @@
-import { Worker, type WorkerOptions } from 'bullmq';
+import { UnrecoverableError, Worker, type WorkerOptions } from 'bullmq';
 import type { Logger } from 'pino';
 import type { Redis } from 'ioredis';
 import {
@@ -62,7 +62,9 @@ export function createNotificationsWorker(deps: {
 
 export function attachWorkerLifecycleLogging(worker: Worker, logger: Logger): void {
   worker.on('completed', (job) => {
-    logger.info({ jobId: String(job.id), attempts: job.attemptsMade + 1 }, 'job completed');
+    // BullMQ increments attemptsMade in moveToCompleted before this event
+    // fires, so the field already holds the final attempt count.
+    logger.info({ jobId: String(job.id), attempts: job.attemptsMade }, 'job completed');
   });
 
   worker.on('failed', (job, err) => {
@@ -78,8 +80,14 @@ export function attachWorkerLifecycleLogging(worker: Worker, logger: Logger): vo
       maxAttempts,
       err,
     };
-    if (attemptsMade >= maxAttempts) {
+    const exhausted = attemptsMade >= maxAttempts;
+    const isPoison = err instanceof UnrecoverableError || err.name === 'UnrecoverableError';
+    if (exhausted) {
       logger.error(fields, 'job exhausted all attempts');
+    } else if (isPoison) {
+      // Poison messages skip the remaining retries by design (TDR §8), so
+      // "retrying" would be a lie in the logs.
+      logger.error(fields, 'job failed unrecoverably (poison message)');
     } else {
       logger.warn(fields, 'job failed, retrying');
     }

@@ -1,28 +1,32 @@
+import type { Redis } from 'ioredis';
 import { loadConfig } from '../config.js';
 import { buildLogger } from '../lib/logger.js';
 import { createRedisClient } from '../lib/redis.js';
 import { createNotificationsWorker } from './notifications-worker.js';
 import { registerGracefulShutdown } from './graceful.js';
-import type { HandlerRegistry } from './handlers.js';
+import { buildHandlerRegistry } from '../handlers/registry.js';
 
 /**
- * Provider handlers (Resend email, webhook POST) land with the delivery
- * layer. Until then the registry is intentionally empty: a job whose type
- * has no handler fails unrecoverably and visibly, rather than being
- * "completed" by a silent no-op.
+ * Registry is built from config: email via Resend when credentials exist,
+ * webhook always. Missing config surfaces as a startup warning and the
+ * affected job type fails unrecoverably at processing time — visible, not
+ * silent.
  */
-const registry: HandlerRegistry = {};
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = buildLogger({ level: config.logLevel, pretty: !config.isProduction });
+  const { registry, warnings } = buildHandlerRegistry({ config, logger });
+  for (const warning of warnings) {
+    logger.warn(warning);
+  }
 
   process.on('unhandledRejection', (err) => {
     logger.fatal({ err }, 'unhandled rejection in worker process');
     process.exit(1);
   });
 
-  let redis;
+  let redis: Redis;
   try {
     redis = await createRedisClient({
       url: config.redisUrl,

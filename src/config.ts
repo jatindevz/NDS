@@ -14,6 +14,11 @@ const envSchema = z.object({
   REDIS_URL: z.string().url(),
   DATABASE_URL: z.string().url(),
   RESEND_API_KEY: z.string().optional(),
+  /** Static bearer token guarding the API (TDR §11). Unset => API rejects all requests (fail-closed). */
+  API_KEY: z.string().min(16).optional(),
+  /** From-address for outbound email; required for the email handler to deliver. */
+  EMAIL_FROM: z.string().min(3).optional(),
+  WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
 });
 
 export type AppConfig = {
@@ -26,6 +31,9 @@ export type AppConfig = {
   redisUrl: string;
   databaseUrl: string;
   resendApiKey: string | undefined;
+  apiKey: string | undefined;
+  emailFrom: string | undefined;
+  webhookTimeoutMs: number;
 };
 
 export class ConfigError extends Error {
@@ -54,5 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     redisUrl: e.REDIS_URL,
     databaseUrl: e.DATABASE_URL,
     resendApiKey: e.RESEND_API_KEY,
+    apiKey: e.API_KEY,
+    emailFrom: e.EMAIL_FROM,
+    webhookTimeoutMs: e.WEBHOOK_TIMEOUT_MS,
   };
 }

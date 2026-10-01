@@ -77,4 +77,35 @@ describe('loadConfig', () => {
     process.env.NODE_ENV = 'production';
     expect(loadConfig().isProduction).toBe(true);
   });
+
+  it('applies the webhook timeout default and accepts overrides', () => {
+    setValidEnv();
+    expect(loadConfig().webhookTimeoutMs).toBe(10_000);
+    process.env.WEBHOOK_TIMEOUT_MS = '2500';
+    expect(loadConfig().webhookTimeoutMs).toBe(2_500);
+  });
+
+  it('rejects an out-of-range WEBHOOK_TIMEOUT_MS', () => {
+    setValidEnv();
+    process.env.WEBHOOK_TIMEOUT_MS = '10';
+    expect(() => loadConfig()).toThrow(/WEBHOOK_TIMEOUT_MS/);
+  });
+
+  it('keeps API_KEY and EMAIL_FROM optional but surfaced', () => {
+    setValidEnv();
+    const bare = loadConfig();
+    expect(bare.apiKey).toBeUndefined();
+    expect(bare.emailFrom).toBeUndefined();
+    process.env.API_KEY = 'a-key-at-least-16ch';
+    process.env.EMAIL_FROM = 'nds@example.com';
+    const full = loadConfig();
+    expect(full.apiKey).toBe('a-key-at-least-16ch');
+    expect(full.emailFrom).toBe('nds@example.com');
+  });
+
+  it('rejects an API_KEY shorter than 16 characters', () => {
+    setValidEnv();
+    process.env.API_KEY = 'short';
+    expect(() => loadConfig()).toThrow(/API_KEY/);
+  });
 });
