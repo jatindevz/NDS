@@ -203,8 +203,10 @@ describe('POST /jobs/:id/retry', () => {
     expect(res.body.status).toBe('queued');
     expect(res.body.attempts).toBe(0);
     expect(queue.add).toHaveBeenCalledOnce();
-    const enqueued = (queue.calls[0]?.data ?? {}) as { idempotency_key?: string };
-    expect(enqueued.idempotency_key).toBe(job.idempotencyKey);
+    // The queue envelope is camelCase (worker contract), unlike the HTTP API's snake_case.
+    const enqueued = (queue.calls[0]?.data ?? {}) as { idempotencyKey?: string; type?: string };
+    expect(enqueued.idempotencyKey).toBe(job.idempotencyKey);
+    expect(enqueued.type).toBe(job.type);
   });
 
   it('returns 409 for a job not in dead_letter', async () => {
